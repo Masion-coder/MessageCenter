@@ -17,7 +17,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 public class Push implements Runnable {
-    private ArrayBlockingQueue<Long> m_buffer;
+    private ArrayBlockingQueue<Message> m_buffer;
     private ThreadPoolExecutor m_pool;
     private int m_port = 40000;
     private static final ObjectMapper MAPPER = new ObjectMapper();
@@ -59,7 +59,7 @@ public class Push implements Runnable {
                     });
                     Data data = new Data(new ArrayList<>(n));
                     while (n-- != 0) {
-                        Long temp = m_buffer.poll();
+                        Message temp = m_buffer.poll();
                         if (temp == null)
                             break;
                         data.add(temp);
@@ -82,7 +82,7 @@ public class Push implements Runnable {
         }
     }
 
-    public Push(ArrayBlockingQueue<Long> buffer) {
+    public Push(ArrayBlockingQueue<Message> buffer) {
         m_buffer = buffer;
         m_pool = new ThreadPoolExecutor(8, 8, 0, TimeUnit.SECONDS,
                 new ArrayBlockingQueue<Runnable>(16), new ThreadPoolExecutor.DiscardPolicy());

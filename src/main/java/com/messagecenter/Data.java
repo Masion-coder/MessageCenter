@@ -3,13 +3,20 @@ package com.messagecenter;
 import java.util.List;
 
 public class Data {
-    public List<Long> data;
+    public List<Message> messages;
 
-    public Data(List<Long> data) {
-        this.data = data;
+    public Data() {
     }
 
-    public boolean add(Long e) {
-        return data.add(e);
+    public Data(List<Message> messages) {
+        this.messages = messages;
+    }
+
+    public boolean add(Message e) {
+        return messages.add(e);
+    }
+
+    public void setMessages(List<Message> messages) {
+        this.messages = messages;
     }
 }

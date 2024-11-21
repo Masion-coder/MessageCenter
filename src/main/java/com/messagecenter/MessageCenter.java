@@ -7,8 +7,8 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
+import java.util.LinkedList;
 import java.util.List;
-import java.util.Map;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.concurrent.ArrayBlockingQueue;
@@ -20,7 +20,11 @@ public class MessageCenter {
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     public static void main(String[] args) throws Exception {
-        ArrayBlockingQueue<Long> buffer = new ArrayBlockingQueue<>(100000);
+        ArrayBlockingQueue<Message> buffer = new ArrayBlockingQueue<>(100000);
+        
+        List<Observer> subscribe = new LinkedList<>();
+
+        Long adder = Long.valueOf(0);
 
         if (new File("data.json").isFile()) {
             try (BufferedReader br = new BufferedReader(
@@ -34,20 +38,18 @@ public class MessageCenter {
                         break;
                     json += String.copyValueOf(buff).substring(0, len);
                 } while (br.ready());
+                // System.out.println("json:" + json);
 
-                Map<String, Object> objectMap = MAPPER.readValue(json, new TypeReference<Map<String, Object>>() {
+                Data data = MAPPER.readValue(json, new TypeReference<Data>() {
                 });
 
-                if (objectMap.containsKey("data")) {
-                    List<Long> data = MAPPER.readValue(objectMap.get("data").toString(),
-                            new TypeReference<List<Long>>() {
-                            });
-                    for (Long num : data) {
-                        if (buffer.offer(num) == false) {
-                            break;
-                        }
+                for (Message message : data.messages) {
+                    if (message.serialNumber > adder) {
+                        adder = message.serialNumber;
                     }
+                    buffer.add(message);
                 }
+                // System.out.println("buffer:" + buffer.size());
             } catch (Exception e) {
                 System.out.println("ERROE(main):" + e.getMessage());
                 if (new File("data.json").exists())
@@ -60,7 +62,8 @@ public class MessageCenter {
             public void run() {
                 try (BufferedWriter bw = new BufferedWriter(
                         new OutputStreamWriter(new FileOutputStream(new File("data.json")), "UTF-16LE"))) {
-                    bw.write("{\"data\":" + buffer.toString() + '}');
+                    bw.write(MAPPER.writeValueAsString(new Data(List.copyOf(buffer))));
+                    System.out.println("buffer:" + List.copyOf(buffer).size());
                 } catch (Exception e) {
                     System.out.println("ERROE:" + e.getMessage());
                 }
@@ -70,7 +73,10 @@ public class MessageCenter {
         Timer timer = new Timer();
         timer.schedule(new Task(), 0, 10000);
 
-        new Thread(new Pull(buffer)).start();
+
+        Pull.m_adder.add(adder);
+        new Thread(new Pull(buffer, subscribe)).start();
         new Thread(new Push(buffer)).start();
+        new Thread(new Subscribe(subscribe)).start();
     }
 }

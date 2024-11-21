@@ -10,15 +10,18 @@ import java.util.Map;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.LongAdder;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 public class Pull implements Runnable {
-    private ArrayBlockingQueue<Long> m_buffer;
+    private ArrayBlockingQueue<Message> m_buffer;
     private ThreadPoolExecutor m_pool;
+    private List<Observer> m_subscribe;
     private int m_port = 30000;
     private static final ObjectMapper MAPPER = new ObjectMapper();
+    protected static LongAdder m_adder = new LongAdder();
 
     class Task implements Runnable {
         private Socket s;
@@ -56,8 +59,25 @@ public class Pull implements Runnable {
                             new TypeReference<List<Long>>() {
                             });
                     for (Long num : data) {
-                        if (m_buffer.offer(num) == false) {
-                            break;
+                        Message temp = new Message();
+                        synchronized (m_adder) {
+                            temp.serialNumber = m_adder.longValue();
+                            m_adder.add(1);
+                            ;
+                        }
+                        temp.time = System.currentTimeMillis();
+                        temp.tag = "number";
+                        temp.value = new Number(num);
+                        synchronized (m_buffer) {
+                            if (m_buffer.offer(temp) == false) {
+                                m_buffer.poll();
+                                m_buffer.offer(temp);
+                            }
+                        }
+                        for (Observer observer : m_subscribe) {
+                            if (observer.getTags().contains("number")) {
+                                observer.offer(temp);
+                            }
                         }
                     }
                     System.out.println(data.size());
@@ -76,10 +96,11 @@ public class Pull implements Runnable {
         }
     }
 
-    public Pull(ArrayBlockingQueue<Long> buffer) {
+    public Pull(ArrayBlockingQueue<Message> buffer, List<Observer> subscribe) {
         m_buffer = buffer;
         m_pool = new ThreadPoolExecutor(8, 8, 0, TimeUnit.SECONDS,
                 new ArrayBlockingQueue<Runnable>(16), new ThreadPoolExecutor.DiscardPolicy());
+        m_subscribe = subscribe;
     }
 
     @Override
