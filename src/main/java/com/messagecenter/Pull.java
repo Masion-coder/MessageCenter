@@ -5,6 +5,8 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ArrayBlockingQueue;
@@ -16,9 +18,14 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 public class Pull implements Runnable {
+    public static final int BROADCAST_MODE = 0;
+    public static final int CLUSTER_MODE = 1;
+
     private ArrayBlockingQueue<Message> m_buffer;
     private ThreadPoolExecutor m_pool;
-    private List<Observer> m_subscribe;
+    private Map<String, List<Observer>> m_subscribe;
+    private int m_mode = BROADCAST_MODE;
+    private Map<String, Integer> m_cycle = new HashMap<>();
     private int m_port = 30000;
     private static final ObjectMapper MAPPER = new ObjectMapper();
     protected static LongAdder m_adder = new LongAdder();
@@ -60,31 +67,53 @@ public class Pull implements Runnable {
                             });
                     for (Long num : data) {
                         Message temp = new Message();
-                        synchronized (m_adder) {
-                            temp.serialNumber = m_adder.longValue();
-                            m_adder.add(1);
-                            ;
-                        }
-                        temp.time = System.currentTimeMillis();
+                        temp.time = new Date();
                         temp.tag = "number";
                         temp.value = new Number(num);
-                        synchronized (m_buffer) {
+                        synchronized (m_adder) {
+                            m_adder.add(1);
+                            temp.serialNumber = m_adder.longValue();
                             if (m_buffer.offer(temp) == false) {
                                 m_buffer.poll();
                                 m_buffer.offer(temp);
                             }
-                        }
-                        for (Observer observer : m_subscribe) {
-                            if (observer.getTags().contains("number")) {
-                                observer.offer(temp);
+                            synchronized (m_subscribe) {
+                                try {
+                                    if (m_subscribe.get(temp.tag) != null && m_subscribe.get(temp.tag).size() != 0) {
+                                        if (m_mode == BROADCAST_MODE) {
+                                            for (Observer observer : m_subscribe.get(temp.tag)) {
+                                                observer.offer(temp);
+                                            }
+                                        } else if (m_mode == CLUSTER_MODE) {
+                                            if (!m_cycle.containsKey(temp.tag)) {
+                                                m_cycle.put(temp.tag, 0);
+                                            }
+                                            int n = (m_cycle.get(temp.tag) + 1) % m_subscribe.get(temp.tag).size();
+                                            int cnt = 0;
+                                            for (Observer observer : m_subscribe.get(temp.tag)) {
+                                                if (cnt == n) {
+                                                    observer.offer(temp);
+                                                    break;
+                                                }
+                                                cnt++;
+                                            }
+                                            m_cycle.put(temp.tag, n);
+                                        }
+                                    }
+                                } catch (Exception e) {
+                                    e.printStackTrace();
+                                    System.out.println("ERROE(Pull/Task):" + e.getMessage());
+                                }
                             }
                         }
                     }
-                    System.out.println(data.size());
+                    System.out.println("接收数据:" + data.size());
                 }
+                s.close();
                 // System.out.println("完成响应");
             } catch (Exception e) {
-                System.out.println("ERROE:" + e.getMessage());
+                e.printStackTrace();
+                System.out.println("ERROE(Pull):" + e.getMessage());
             } finally {
                 try {
                     s.close();
@@ -96,11 +125,15 @@ public class Pull implements Runnable {
         }
     }
 
-    public Pull(ArrayBlockingQueue<Message> buffer, List<Observer> subscribe) {
+    public Pull(ArrayBlockingQueue<Message> buffer, Map<String, List<Observer>> subscribe) {
         m_buffer = buffer;
         m_pool = new ThreadPoolExecutor(8, 8, 0, TimeUnit.SECONDS,
                 new ArrayBlockingQueue<Runnable>(16), new ThreadPoolExecutor.DiscardPolicy());
         m_subscribe = subscribe;
+    }
+
+    public void setMode(int mode) {
+        m_mode = mode;
     }
 
     @Override
